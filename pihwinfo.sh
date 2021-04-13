@@ -48,7 +48,7 @@ readonly RK_SCRIPT=$0              # Store the script name for help() and doc() 
 readonly RK_HAS_MANDATORY_ARGUMENTS="NO"   # "YES" or "NO"
 readonly TMPFILE=$(mktemp)      # Generate the temporary mask
 # Add the commands and libraries required for the script to run
-RK_DEPENDENCIES="sed grep date bc vcgencmd sysbench"
+RK_DEPENDENCIES="sed grep date bc uniq vcgencmd "
 RK_LIBRARIES=""
 
 # CODES FOR TERMINAL - Optimized for compatibility - use printf also for better compatibility
@@ -318,10 +318,10 @@ update_sensor_stats()
         fi
 
         if [ $DEC_THROTTLE -ge $((16#1)) ]; then
-          TMP_THROTTLE_REASON=$TMP_THROTTLE_REASON"Arm frequency capped|"
+          TMP_THROTTLE_REASON=$TMP_THROTTLE_REASON"Under-voltage detected|"
         fi
 
-        THROTTLE_REASON=$(echo $TMP_THROTTLE_REASON | sed 's/|$//')
+        THROTTLE_REASON=$(echo $TMP_THROTTLE_REASON | tr '|' '\n' | sort | uniq | tr '\n' '|' | sed 's/|$//')
     fi
 
     # Check and process tests
@@ -354,6 +354,17 @@ update_sensor_stats()
 check_libraries
 # Check if we have all the required commands
 check_dependencies
+# Check the optional commands
+# Sysbench
+if hash "sysbench" >/dev/null 2>&1; then
+	SYSBENCH="TRUE"
+  SYSBENCH_RUN="NONE"
+  SYSBENCH_MSG="| ${REVERSE}S${REVERSE_OFF}hort/Long ${REVERSE}C${REVERSE_OFF}PU Test |"
+else
+  SYSBENCH="FALSE"
+  SYSBENCH_RUN="Install Sysbench to run this test."
+  SYSBENCH_MSG="-----------------------"
+fi
 
 # Command Line Parsing
 echo -e "\n"
@@ -395,9 +406,8 @@ CAMERA=$(vcgencmd get_camera )
 LCD=$(vcgencmd get_lcd_info| tr ' ' '#' | sed 's/#/ pixel H x /' | sed 's/#/ pixel V x /')" bpp"
 MEMVOLTAGE=" sdram_c=$(vcgencmd measure_volts sdram_c | cut -f2 -d'=') sdram_i=$(vcgencmd measure_volts sdram_i | cut -f2 -d'=') sdram_p=$(vcgencmd measure_volts sdram_p | cut -f2 -d'=')"
 START="$(date +"%d/%h/%y - %H:%M:%S" )"
-MINPRIME=35000
-MAXPRIME=100000
-SYSBENCH_RUN="NONE"
+MINPRIME=50000
+MAXPRIME=300000
 
 tput clear
 reset_sensor_stats
@@ -427,8 +437,8 @@ reset_sensor_stats
 
         # First we print static information
         printf "${FG_LIGHTBLUE}==========================|${BOLD} RPi HW Info ${STYLE_OFF}${FG_LIGHTBLUE}|=========================${STYLE_OFF}\n"
-        printf "${FG_LIGHTBLUE}==============<${BOLD} START:   $START ${STYLE_OFF}${FG_LIGHTBLUE}|===================${STYLE_OFF}\n"
-        printf "${FG_LIGHTBLUE}==============|${BOLD} ACTUAL:  $(date +"%d/%h/%y - %H:%M:%S" ) ${STYLE_OFF}${FG_LIGHTBLUE}|===================${STYLE_OFF}\n"
+        printf "${FG_LIGHTBLUE}==============<${BOLD} START:   $START ${STYLE_OFF}${FG_LIGHTBLUE}|===================${STYLE_OFF}  \n"
+        printf "${FG_LIGHTBLUE}==============|${BOLD} ACTUAL:  $(date +"%d/%h/%y - %H:%M:%S" ) ${STYLE_OFF}${FG_LIGHTBLUE}|===================${STYLE_OFF}  \n"
         printf "VERSION:\t${FG_GREEN} $VERSION1  ${FG_DEFAULT}\n"
         printf "${FG_GREEN} $VERSION2  ${FG_DEFAULT}\n"
         printf "CAMERA:\t${FG_GREEN} $CAMERA  ${FG_DEFAULT}\n"
@@ -443,7 +453,7 @@ reset_sensor_stats
         printf "Temp: ${FG_GREEN}  %0.1f C${STYLE_OFF}  \tMax: ${FG_GREEN}%0.1f  C${FG_DEFAULT}  \tMin: ${FG_GREEN}%0.1f  C${FG_DEFAULT}  \tAvg: ${FG_GREEN}%0.1f  ${STYLE_OFF}\n" $(echo "$TEMP/10" | bc -l )  $(echo "$MAXTEMP/10" | bc -l ) $(echo "$MINTEMP/10" | bc -l ) $(echo "$AVGTEMP/10" | bc -l )
         printf "Voltage: ${FG_GREEN} %0.4f V${STYLE_OFF}\tMax: ${FG_GREEN}%0.4f  V${FG_DEFAULT}\tMin: ${FG_GREEN}%0.4f  V${FG_DEFAULT}\tAvg: ${FG_GREEN}%0.4f  ${STYLE_OFF}\n" $(echo "$VOLTAGE/10000" | bc -l )  $(echo "$MAXVOLTAGE/10000" | bc -l ) $(echo "$MINVOLTAGE/10000" | bc -l ) $(echo "$AVGVOLTAGE/10000" | bc -l )
         printf "Trottle reason: ${FG_GREEN} ($THROTTLE)\n$(echo $THROTTLE_REASON | tr '|' '\n')${STYLE_OFF}\n"
-        printf "${FG_LIGHTBLUE}----| ${REVERSE}S${REVERSE_OFF}hort/Long ${REVERSE}C${REVERSE_OFF}PU Test |--| TESTS |-----------------------------${STYLE_OFF}\n"
+        printf "${FG_LIGHTBLUE}----$SYSBENCH_MSG--| TESTS |-----------------------------${STYLE_OFF}\n"
         printf "CPU Test (sysbench) : ${FG_GREEN}$SYSBENCH_RUN${STYLE_OFF}\n"
         printf "${FG_LIGHTBLUE}===================================================================${STYLE_OFF}\n"
         sleep 1
@@ -469,15 +479,17 @@ while [ $DISPLAY_DATA -eq 1 ]; do
                 touch $TMPFILE-reset_sensor_stats
                 ;;
               S|s|c|C)
-                THREADS=$(grep -c processor /proc/cpuinfo)
-                if [ "$KEYPRESS" == "C" ] || [ "$KEYPRESS" == "c" ]; then
-                  PRIME=$MAXPRIME
-                else
-                  PRIME=$MINPRIME
-                fi
-                if [ ! -e $TMPFILE-sysbench ]; then
-                  echo "prime number:$PRIME" > $TMPFILE-sysbench 
-                  ( sysbench --batch --batch-delay=1 --num-threads=$THREADS --test=cpu --cpu-max-prime=$PRIME run >> $TMPFILE-sysbench )&
+                if [ "$SYSBENCH" == "TRUE" ]; then
+                  THREADS=$(grep -c processor /proc/cpuinfo)
+                  if [ "$KEYPRESS" == "C" ] || [ "$KEYPRESS" == "c" ]; then
+                    PRIME=$MAXPRIME
+                  else
+                    PRIME=$MINPRIME
+                  fi
+                  if [ ! -e $TMPFILE-sysbench ]; then
+                    echo "prime number:$PRIME" > $TMPFILE-sysbench 
+                    ( sysbench --batch --batch-delay=1 --num-threads=$THREADS --test=cpu --cpu-max-prime=$PRIME run >> $TMPFILE-sysbench )&
+                  fi
                 fi
                 ;;                
               l|L)
