@@ -7,7 +7,7 @@
 #H    This script is designed to do HW reporting on the Raspberry Pi and 
 #H   CPU stress tests. It will report the internal Frequencies, Temperature, 
 #H   Voltages and do some statistics with them. It also allows to Log the 
-#H   Data ad run short/long stress CPU tests using sysbench.
+#H   Data and run short/long stress CPU tests using sysbench.
 #H
 #H  USAGE
 #H    pihwinfo.sh [-h] [-d] 
